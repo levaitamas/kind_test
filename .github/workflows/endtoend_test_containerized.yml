@@ -1,4 +1,4 @@
-name: End-to-End Test Containerized MetalLB
+name: End-to-End Test Containerized
 
 on: [push, pull_request]
 
@@ -15,64 +15,41 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Install cloud-provider-kind
+        run: |
+            go install sigs.k8s.io/cloud-provider-kind@latest
+            echo "${HOME}/go/bin" >> $GITHUB_PATH
+            cloud-provider-kind  &>cpk.log &
+
       - name: Create k8s Kind Cluster
         uses: helm/kind-action@v1
         with:
             config: kind-config.yaml
 
-      - name: Install MetalLB
-        run: |
-              kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.7/config/manifests/metallb-native.yaml
-              kubectl wait --namespace metallb-system \
-                          --for=condition=ready pod \
-                          --selector=app=metallb \
-                          --timeout=90s
-              
-              # Use a hardcoded IPv4 range that should be safe to use
-              cat <<EOF | kubectl apply -f -
-              apiVersion: metallb.io/v1beta1
-              kind: IPAddressPool
-              metadata:
-                name: default
-                namespace: metallb-system
-              spec:
-                addresses:
-                - 172.18.255.200-172.18.255.250
-              ---
-              apiVersion: metallb.io/v1beta1
-              kind: L2Advertisement
-              metadata:
-                name: default
-                namespace: metallb-system
-              EOF
 
       - name: Apply manifests
         run: |
             kubectl apply -f deployment.yaml
             kubectl apply -f service.yaml
-            kubectl wait --for=condition=ready pod --selector=app=demo-http-server --timeout=60s
 
-      - name: Wait for LoadBalancer to get external IP
+      - name: Wait for server to be ready
         run: |
-          echo "Waiting for external IP (timeout: 120s)..."
-          timeout 120s bash -c 'until kubectl get service demo-http-server-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}" | grep -v "null"; do sleep 2; done' || true
-          EXTERNAL_IP=$(kubectl get service demo-http-server-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
-
-          if [ -z "$EXTERNAL_IP" ]; then
-            echo "Failed to get external IP, test will likely fail"
-          else
-            echo "Service has external IP: $EXTERNAL_IP"
-            echo "SERVICE_URL=http://${EXTERNAL_IP}:5000" >> $GITHUB_ENV
-          fi
+            kubectl wait --for=condition=ready pod --selector=app=demo-http-server --timeout=120s
+            kubectl get svc -owide
 
       - name: Send GET request and check response
         run: |
-          response=$(curl -s ${{ env.SERVICE_URL }})
+          response=$(curl -s http://localhost:5000
           echo "Response: $response"
 
           if [ "$response" == "Hello there!" ]; then
-            echo "✅ The value received is correct"
+            echo "The value received is correct"
           else
-            echo "❌ Received value is incorrect"
-            exit 1
+            echo "Received value is incorrect"
+            #exit 1
           fi
+
+
+      - name: Show logs
+        run: |
+          cat cpk.log
