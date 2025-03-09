@@ -13,7 +13,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.23'
 
       - name: Install cloud-provider-kind
         run: |
@@ -39,14 +39,15 @@ jobs:
 
       - name: Send GET request and check response
         run: |
-          response=$(curl -s http://localhost:5000)
+          ADDR=$(kubectl get svc demo-http-server-service -o jsonpath="{.status.loadBalancer.ingress[0].ip}"):5000
+          response=$(curl -s $ADDR)
           echo "Response: $response"
 
           if [ "$response" == "Hello there!" ]; then
             echo "The value received is correct"
           else
             echo "Received value is incorrect"
-            #exit 1
+            exit 1
           fi
 
 
